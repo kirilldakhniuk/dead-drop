@@ -1,0 +1,100 @@
+{
+    "name": "kirilldakhniuk/dead-drop",
+    "description": "Export and import your database tables with fake data",
+    "keywords": [
+        "php",
+        "laravel",
+        "database",
+        "export",
+        "import",
+        "faker",
+        "anonymization",
+        "privacy",
+        "gdpr",
+        "sql",
+        "backup"
+    ],
+    "homepage": "https://github.com/kirilldakhniuk/dead-drop",
+    "license": "MIT",
+    "support": {
+        "issues": "https://github.com/kirilldakhniuk/dead-drop/issues",
+        "source": "https://github.com/kirilldakhniuk/dead-drop"
+    },
+    "authors": [
+        {
+            "name": "Kirill Dakhniuk",
+            "email": "hello@kirilldakhniuk.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/console": "*",
+        "illuminate/database": "*",
+        "illuminate/filesystem": "*",
+        "illuminate/support": "*"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.18.1",
+        "orchestra/testbench": "^10.8",
+        "pestphp/pest": "^3.5.1",
+        "pestphp/pest-plugin-type-coverage": "^3.1",
+        "phpstan/phpstan": "^1.12.7",
+        "rector/rector": "^1.2.8",
+        "symfony/var-dumper": "^7.1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "KirillDakhniuk\\DeadDrop\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/",
+            "Workbench\\Database\\Factories\\": "workbench/database/factories/",
+            "Workbench\\Database\\Seeders\\": "workbench/database/seeders/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "extra": {
+        "laravel": {
+            "providers": [
+                "KirillDakhniuk\\DeadDrop\\DeadDropServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "scripts": {
+        "refacto": "rector",
+        "lint": "pint",
+        "test:refacto": "rector --dry-run",
+        "test:lint": "pint --test",
+        "test:types": "phpstan analyse --ansi",
+        "test:unit": "pest --colors=always --coverage --parallel --min=100",
+        "test": [
+            "@test:refacto",
+            "@test:lint",
+            "@test:types",
+            "@test:unit"
+        ],
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare"
+        ],
+        "clear": "@php vendor/bin/testbench package:purge-skeleton --ansi",
+        "prepare": "@php vendor/bin/testbench package:discover --ansi",
+        "build": "@php vendor/bin/testbench workbench:build --ansi",
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "@build",
+            "@php vendor/bin/testbench serve --ansi"
+        ]
+    }
+}

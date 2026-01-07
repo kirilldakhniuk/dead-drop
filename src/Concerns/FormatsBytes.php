@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace KirillDakhniuk\DeadDrop\Concerns;
+
+trait FormatsBytes
+{
+    protected function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= (1 << (10 * $pow));
+
+        return round($bytes, 2).' '.$units[$pow];
+    }
+}

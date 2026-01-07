@@ -1,0 +1,10 @@
+.DS_Store
+.idea
+.nova
+.php-cs-fixer.cache
+.phpunit.result.cache
+vendor/
+composer.lock
+phpunit.xml
+.phpunit.cache
+testbench.yaml
