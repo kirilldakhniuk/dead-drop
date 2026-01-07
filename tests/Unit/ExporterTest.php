@@ -288,3 +288,119 @@ test('exportTable hashes password fields automatically', function () {
     expect($content)->not->toContain('secret123')
         ->and($content)->toMatch('/\'\$2y\$/');
 });
+
+test('exportTable accepts override parameter', function () {
+    $exporter = new Exporter;
+    $outputPath = sys_get_temp_dir().'/dead-drop-test';
+
+    $overrides = [
+        'where' => [
+            ['created_at', '>=', now()->subDays(1)->toDateTimeString()],
+        ],
+    ];
+
+    $result = $exporter->exportTable('users', 'testing', $outputPath, $overrides);
+
+    expect($result)->toBeArray()
+        ->and($result['table'])->toBe('users');
+});
+
+test('exportTable merges override where with config where', function () {
+    Config::set('dead-drop.tables.users.where', [
+        ['email', 'like', '%@example.com'],
+    ]);
+
+    $exporter = new Exporter;
+    $outputPath = sys_get_temp_dir().'/dead-drop-test';
+
+    $overrides = [
+        'where' => [
+            ['created_at', '>=', now()->subDays(7)->toDateTimeString()],
+        ],
+    ];
+
+    $result = $exporter->exportTable('users', 'testing', $outputPath, $overrides);
+
+    expect($result)->toBeArray()
+        ->and($result['table'])->toBe('users');
+});
+
+test('exportTable override replaces limit', function () {
+    Config::set('dead-drop.tables.users.limit', 10);
+
+    $exporter = new Exporter;
+    $outputPath = sys_get_temp_dir().'/dead-drop-test';
+
+    $overrides = ['limit' => 2];
+
+    $result = $exporter->exportTable('users', 'testing', $outputPath, $overrides);
+
+    expect($result['records'])->toBe(2);
+});
+
+test('exportTable date filtering actually filters records', function () {
+    $db = app('db');
+    $db->table('users')->truncate();
+
+    $db->table('users')->insert([
+        'name' => 'Old User 1',
+        'email' => 'old1@example.com',
+        'password' => 'password',
+        'created_at' => now()->subDays(40)->toDateTimeString(),
+        'updated_at' => now()->subDays(40)->toDateTimeString(),
+    ]);
+
+    $db->table('users')->insert([
+        'name' => 'Old User 2',
+        'email' => 'old2@example.com',
+        'password' => 'password',
+        'created_at' => now()->subDays(35)->toDateTimeString(),
+        'updated_at' => now()->subDays(35)->toDateTimeString(),
+    ]);
+
+    $db->table('users')->insert([
+        'name' => 'Recent User 1',
+        'email' => 'recent1@example.com',
+        'password' => 'password',
+        'created_at' => now()->subDays(20)->toDateTimeString(),
+        'updated_at' => now()->subDays(20)->toDateTimeString(),
+    ]);
+
+    $db->table('users')->insert([
+        'name' => 'Recent User 2',
+        'email' => 'recent2@example.com',
+        'password' => 'password',
+        'created_at' => now()->subDays(10)->toDateTimeString(),
+        'updated_at' => now()->subDays(10)->toDateTimeString(),
+    ]);
+
+    $db->table('users')->insert([
+        'name' => 'Recent User 3',
+        'email' => 'recent3@example.com',
+        'password' => 'password',
+        'created_at' => now()->subDays(5)->toDateTimeString(),
+        'updated_at' => now()->subDays(5)->toDateTimeString(),
+    ]);
+
+    $exporter = new Exporter;
+    $outputPath = sys_get_temp_dir().'/dead-drop-test';
+
+    $overrides = [
+        'where' => [
+            ['created_at', '>=', now()->subDays(30)->startOfDay()->toDateTimeString()],
+        ],
+    ];
+
+    $result = $exporter->exportTable('users', 'testing', $outputPath, $overrides);
+
+    expect($result['records'])->toBe(3);
+
+    $content = file_get_contents($result['file']);
+
+    expect($content)->toContain('Recent User 1')
+        ->and($content)->toContain('Recent User 2')
+        ->and($content)->toContain('Recent User 3');
+
+    expect($content)->not->toContain('Old User 1')
+        ->and($content)->not->toContain('Old User 2');
+});

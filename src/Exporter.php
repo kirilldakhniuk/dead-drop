@@ -16,12 +16,26 @@ final class Exporter
     public function exportTable(
         string $table,
         string $connection,
-        string $outputPath
+        string $outputPath,
+        ?array $overrides = null
     ): array {
         $config = config("dead-drop.tables.{$table}");
 
         if (! $config || $config === false) {
             throw new \InvalidArgumentException("Table {$table} is not configured for export");
+        }
+
+        // Merge runtime overrides with config
+        if ($overrides) {
+            // Special handling for where clause - append instead of replace
+            if (isset($overrides['where'])) {
+                $whereOverrides = $overrides['where'];
+                unset($overrides['where']);
+                $config = array_merge($config, $overrides);
+                $config['where'] = array_merge($config['where'] ?? [], $whereOverrides);
+            } else {
+                $config = array_merge($config, $overrides);
+            }
         }
 
         // Ensure output directory exists
@@ -95,7 +109,7 @@ final class Exporter
         return $result;
     }
 
-    public function exportAll(string $outputPath, ?string $connection = null): array
+    public function exportAll(string $outputPath, ?string $connection = null, ?array $overrides = null): array
     {
         $connection = $connection ?? config('database.default');
         $tables = config('dead-drop.tables', []);
@@ -107,10 +121,22 @@ final class Exporter
                 continue;
             }
 
-            $exportedTables[] = $this->exportTable($table, $connection, $outputPath);
+            $exportedTables[] = $this->exportTable($table, $connection, $outputPath, $overrides);
         }
 
         return $exportedTables;
+    }
+
+    public function export(
+        string $table,
+        ?array $overrides = null,
+        ?string $connection = null,
+        ?string $outputPath = null
+    ): array {
+        $connection = $connection ?? config('database.default');
+        $outputPath = $outputPath ?? config('dead-drop.output_path', storage_path('app/dead-drop'));
+
+        return $this->exportTable($table, $connection, $outputPath, $overrides);
     }
 
     protected function exportToSql(string $table, $data, string $outputPath): string

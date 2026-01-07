@@ -24,6 +24,11 @@ class DeadDropServiceProvider extends ServiceProvider
         $this->app->singleton(Importer::class, function ($app) {
             return new Importer;
         });
+
+        // Register facade alias
+        $this->app->singleton('dead-drop', function ($app) {
+            return $app->make(Exporter::class);
+        });
     }
 
     public function boot(): void

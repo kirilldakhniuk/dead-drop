@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace KirillDakhniuk\DeadDrop\Commands;
 
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use KirillDakhniuk\DeadDrop\Concerns\FormatsBytes;
 use KirillDakhniuk\DeadDrop\Exporter;
@@ -11,6 +12,7 @@ use KirillDakhniuk\DeadDrop\Exporter;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\spin;
+use function Laravel\Prompts\text;
 
 class ExportCommand extends Command
 {
@@ -70,8 +72,11 @@ class ExportCommand extends Command
             options: $availableTables,
         );
 
+        $dateConditions = $this->promptForDateRange();
+        $overrides = $dateConditions ? ['where' => $dateConditions] : null;
+
         $result = spin(
-            callback: fn () => $exporter->exportTable($table, $connection, $outputPath),
+            callback: fn () => $exporter->exportTable($table, $connection, $outputPath, $overrides),
             message: "Exporting {$table}..."
         );
 
@@ -105,8 +110,11 @@ class ExportCommand extends Command
         string $outputPath,
         string $connection
     ): int {
+        $dateConditions = $this->promptForDateRange();
+        $overrides = $dateConditions ? ['where' => $dateConditions] : null;
+
         $results = spin(
-            callback: fn () => $exporter->exportAll($outputPath, $connection),
+            callback: fn () => $exporter->exportAll($outputPath, $connection, $overrides),
             message: 'Exporting all configured tables...'
         );
 
@@ -163,5 +171,94 @@ class ExportCommand extends Command
         $this->info("Output directory: {$outputPath}");
 
         return self::SUCCESS;
+    }
+
+    protected function promptForDateRange(): ?array
+    {
+        $option = select(
+            label: 'Filter by date range?',
+            options: [
+                'today' => 'Today',
+                'yesterday' => 'Yesterday',
+                'last_week' => 'Last 7 days',
+                'last_month' => 'Last 30 days',
+                'custom' => 'Custom interval',
+            ],
+            default: 'today'
+        );
+
+        $this->newLine();
+
+        if ($option === 'custom') {
+            return $this->promptForCustomDateRange();
+        }
+
+        return $this->getPresetDateRange($option);
+    }
+
+    protected function promptForCustomDateRange(): ?array
+    {
+        $dateFrom = $this->promptForDate('Filter from date (optional)');
+        $dateTo = $this->promptForDate('Filter to date (optional)');
+
+        if (! $dateFrom && ! $dateTo) {
+            return null;
+        }
+
+        $conditions = [];
+        if ($dateFrom) {
+            $conditions[] = ['created_at', '>=', $dateFrom->toDateTimeString()];
+        }
+        if ($dateTo) {
+            $conditions[] = ['created_at', '<=', $dateTo->toDateTimeString()];
+        }
+
+        return $conditions;
+    }
+
+    protected function getPresetDateRange(string $option): array
+    {
+        $conditions = [];
+
+        switch ($option) {
+            case 'today':
+                $conditions[] = ['created_at', '>=', Carbon::today()->startOfDay()->toDateTimeString()];
+                break;
+
+            case 'yesterday':
+                $conditions[] = ['created_at', '>=', Carbon::yesterday()->startOfDay()->toDateTimeString()];
+                $conditions[] = ['created_at', '<', Carbon::today()->startOfDay()->toDateTimeString()];
+                break;
+
+            case 'last_week':
+                $conditions[] = ['created_at', '>=', Carbon::now()->subDays(7)->startOfDay()->toDateTimeString()];
+                break;
+
+            case 'last_month':
+                $conditions[] = ['created_at', '>=', Carbon::now()->subDays(30)->startOfDay()->toDateTimeString()];
+                break;
+        }
+
+        return $conditions;
+    }
+
+    protected function promptForDate(string $label): ?Carbon
+    {
+        while (true) {
+            $input = text(
+                label: $label,
+                hint: 'Examples: 2024-01-01, last month, 30 days ago, yesterday (or leave empty to skip)'
+            );
+
+            if (empty(trim($input))) {
+                return null;
+            }
+
+            try {
+                return Carbon::parse($input);
+            } catch (\Exception $e) {
+                $this->error('Invalid date format. Please try again.');
+            }
+        }
     }
 }

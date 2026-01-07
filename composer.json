@@ -61,7 +61,10 @@
         "laravel": {
             "providers": [
                 "KirillDakhniuk\\DeadDrop\\DeadDropServiceProvider"
-            ]
+            ],
+            "aliases": {
+                "DeadDrop": "KirillDakhniuk\\DeadDrop\\Facades\\DeadDrop"
+            }
         }
     },
     "config": {

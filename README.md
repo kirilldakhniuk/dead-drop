@@ -43,6 +43,76 @@ php artisan dead-drop:export --connection=mysql
 php artisan dead-drop:import --connection=tenant_db
 ```
 
+## Interactive Date Filtering
+
+Filter by date range interactively when exporting:
+
+```bash
+php artisan dead-drop:export
+```
+
+Choose from preset date ranges or enter a custom interval:
+
+```
+Export all configured tables? (yes/no) [no]:
+> yes
+
+Filter by date range?
+  Today
+  Yesterday
+  Last 7 days
+  Last 30 days
+> Custom interval
+
+Filter from date (optional):
+Examples: 2024-01-01, last month, 30 days ago, yesterday
+> last month
+
+Filter to date (optional):
+Examples: 2024-01-01, last month, 30 days ago, yesterday
+> yesterday
+```
+
+Preset options provide quick access to common date ranges (defaults to "Today"). Custom interval supports natural language dates via Carbon. Date filters work for both single table and batch exports, applied alongside config-based where conditions.
+
+## Facade API
+
+Use the `DeadDrop` facade for programmatic exports:
+
+```php
+use KirillDakhniuk\DeadDrop\Facades\DeadDrop;
+
+// Simple export
+DeadDrop::export('users');
+
+// With date range
+DeadDrop::export('users', [
+    'where' => [
+        ['created_at', '>=', '2024-01-01'],
+        ['created_at', '<=', now()->toDateTimeString()]
+    ]
+]);
+
+// Export all tables with date filter
+DeadDrop::exportAll(null, null, [
+    'where' => [
+        ['created_at', '>=', now()->subMonth()->toDateTimeString()],
+    ]
+]);
+
+// Perfect for Nova/Filament
+public function handle()
+{
+    $result = DeadDrop::export('users', [
+        'where' => [
+            ['created_at', '>=', $this->startDate],
+        ]
+    ]);
+
+    return Action::download($result['file']);
+}
+```
+
 ## Configuration
 
 Edit `config/dead-drop.php` to configure which tables to export:
