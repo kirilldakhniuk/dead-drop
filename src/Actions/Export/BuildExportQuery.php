@@ -64,7 +64,8 @@ class BuildExportQuery
         }
 
         if (empty($query->orders)) {
-            $query->orderBy('id');
+            $primaryKey = $config['primary_key'] ?? 'id';
+            $query->orderBy($primaryKey);
         }
 
         return $query;

@@ -297,8 +297,8 @@ test('exportTable date filtering actually filters records', function () {
     // Insert old users (40 and 35 days ago)
     collect([40, 35])->each(function ($daysAgo, $index) use ($db) {
         $db->table('users')->insert([
-            'name' => "Old User ".($index + 1),
-            'email' => "old".($index + 1)."@example.com",
+            'name' => 'Old User '.($index + 1),
+            'email' => 'old'.($index + 1).'@example.com',
             'password' => 'password',
             'created_at' => now()->subDays($daysAgo)->toDateTimeString(),
             'updated_at' => now()->subDays($daysAgo)->toDateTimeString(),
@@ -308,8 +308,8 @@ test('exportTable date filtering actually filters records', function () {
     // Insert recent users (20, 10, and 5 days ago)
     collect([20, 10, 5])->each(function ($daysAgo, $index) use ($db) {
         $db->table('users')->insert([
-            'name' => "Recent User ".($index + 1),
-            'email' => "recent".($index + 1)."@example.com",
+            'name' => 'Recent User '.($index + 1),
+            'email' => 'recent'.($index + 1).'@example.com',
             'password' => 'password',
             'created_at' => now()->subDays($daysAgo)->toDateTimeString(),
             'updated_at' => now()->subDays($daysAgo)->toDateTimeString(),
@@ -336,4 +336,43 @@ test('exportTable date filtering actually filters records', function () {
         ->toContain('Recent User 3')
         ->not->toContain('Old User 1')
         ->not->toContain('Old User 2');
+});
+
+test('exportTable works with custom primary key', function () {
+    $db = app('db');
+    $db->getSchemaBuilder()->create('companies', function ($table) {
+        $table->unsignedBigInteger('company_id')->primary();
+        $table->string('name');
+        $table->timestamps();
+    });
+
+    for ($i = 1; $i <= 3; $i++) {
+        $db->table('companies')->insert([
+            'company_id' => $i,
+            'name' => "Company {$i}",
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    Config::set('dead-drop.tables.companies', [
+        'columns' => ['company_id', 'name', 'created_at', 'updated_at'],
+        'primary_key' => 'company_id',
+    ]);
+
+    $exporter = app(Exporter::class);
+
+    $result = $exporter->exportTable('companies', 'testing', TEST_OUTPUT_PATH);
+
+    expect($result)
+        ->table->toBe('companies')
+        ->records->toBe(3);
+
+    $content = File::get($result['file']);
+
+    expect($content)
+        ->toContain('INSERT OR REPLACE INTO `companies`')
+        ->toContain('Company 1')
+        ->toContain('Company 2')
+        ->toContain('Company 3');
 });

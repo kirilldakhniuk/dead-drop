@@ -62,6 +62,7 @@ return [
     | - where: Filter conditions
     | - order_by: Sort clause (e.g., 'created_at DESC')
     | - limit: Maximum records
+    | - primary_key: Primary key column (defaults to 'id')
     | - censor: Replace with fake data (['email'] or ['email' => 'safeEmail'])
     | - defaults: Values for omitted NOT NULL fields (passwords auto-hashed)
     |

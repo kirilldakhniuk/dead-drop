@@ -2,6 +2,9 @@
 
 All notable changes to Dead Drop will be documented in this file.
 
+## 0.3.1 - 2026-01-23
+- Added ability to specify table `primary_key`
+
 ## 0.3.0 - 2026-01-23
 
 ### Fixed

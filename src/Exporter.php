@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace KirillDakhniuk\DeadDrop;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\File;
 use KirillDakhniuk\DeadDrop\Actions\Export\BuildExportQuery;
 use KirillDakhniuk\DeadDrop\Actions\Export\WriteTableToHandle;
@@ -103,6 +104,7 @@ final class Exporter
             foreach ($tables as $table) {
                 $config = $this->queryBuilder->resolveTableConfig($table, $overrides);
                 $query = $this->queryBuilder->execute($table, $connection, $overrides);
+                $primaryKey = $config['primary_key'] ?? 'id';
 
                 $this->writeTableHeader($handle, $table, $config);
 
@@ -114,7 +116,8 @@ final class Exporter
                     $config,
                     $driver,
                     $connection,
-                    $progressCallback ? fn ($current) => $progressCallback($cumulativeOffset + $current) : null
+                    $progressCallback ? fn ($current) => $progressCallback($cumulativeOffset + $current) : null,
+                    $primaryKey
                 );
 
                 $totalRecords += $recordsExported;
@@ -260,7 +263,7 @@ final class Exporter
 
     protected function exportToSql(
         string $table,
-        $query,
+        Builder $query,
         string $outputPath,
         array $config,
         string $connection,
@@ -278,8 +281,9 @@ final class Exporter
         fwrite($handle, "-- Format: upsert (safe for re-import)\n\n");
 
         $driver = config("database.connections.{$connection}.driver");
+        $primaryKey = $config['primary_key'] ?? 'id';
 
-        $recordCount = $this->tableWriter->execute($table, $query, $handle, $config, $driver, $connection, $progressCallback);
+        $recordCount = $this->tableWriter->execute($table, $query, $handle, $config, $driver, $connection, $progressCallback, $primaryKey);
 
         fclose($handle);
 
@@ -302,7 +306,7 @@ final class Exporter
         return $result;
     }
 
-    protected function writeFileHeader($handle, string $connection, int $tableCount): void
+    protected function writeFileHeader(mixed $handle, string $connection, int $tableCount): void
     {
         fwrite($handle, "-- Dead Drop Export\n");
         fwrite($handle, '-- Exported: '.now()->toDateTimeString()."\n");
@@ -310,7 +314,7 @@ final class Exporter
         fwrite($handle, "-- Tables: {$tableCount}\n\n");
     }
 
-    protected function writeTableHeader($handle, string $table, array $config): void
+    protected function writeTableHeader(mixed $handle, string $table, array $config): void
     {
         fwrite($handle, "\n-- Table: {$table}\n");
 
@@ -322,7 +326,7 @@ final class Exporter
         fwrite($handle, "\n");
     }
 
-    protected function writeFileFooter($handle, int $totalRecords): void
+    protected function writeFileFooter(mixed $handle, int $totalRecords): void
     {
         fwrite($handle, "\n-- Export complete: {$totalRecords} records\n");
     }

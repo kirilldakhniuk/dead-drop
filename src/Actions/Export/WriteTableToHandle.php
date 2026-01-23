@@ -16,15 +16,18 @@ class WriteTableToHandle
     public function execute(
         string $table,
         Builder $query,
-        $handle,
+        mixed $handle,
         array $config,
         string $driver,
         ?string $connection = null,
-        ?callable $progressCallback = null
+        ?callable $progressCallback = null,
+        string $primaryKey = 'id'
     ): int {
         if ($connection !== null) {
             $this->sqlGenerator->setConnection($connection);
         }
+
+        $this->sqlGenerator->setPrimaryKey($primaryKey);
 
         $recordCount = 0;
         $chunkSize = config('dead-drop.performance.chunk_size', 1000);

@@ -8,12 +8,11 @@ use Illuminate\Support\Facades\DB;
 
 class GenerateUpsertSql
 {
-    protected ?string $connection = null;
+    protected string $primaryKey = 'id';
 
-    public function __construct(?string $connection = null)
-    {
-        $this->connection = $connection;
-    }
+    public function __construct(
+        protected ?string $connection = null
+    ) {}
 
     public function setConnection(string $connection): self
     {
@@ -22,10 +21,17 @@ class GenerateUpsertSql
         return $this;
     }
 
+    public function setPrimaryKey(string $primaryKey): self
+    {
+        $this->primaryKey = $primaryKey;
+
+        return $this;
+    }
+
     public function forRow(string $table, array $row, string $driver): string
     {
         $columns = implode(', ', array_map(fn ($col) => $this->quoteIdentifier($col, $driver), array_keys($row)));
-        $values = $this->formatValues(array_values($row), $driver);
+        $values = $this->formatValues(array_values($row));
 
         return $this->buildStatement($table, $row, $columns, "({$values})", $driver);
     }
@@ -54,7 +60,7 @@ class GenerateUpsertSql
 
         $valueRows = [];
         foreach ($batch as $row) {
-            $valueRows[] = '('.$this->formatValues(array_values($row), $driver).')';
+            $valueRows[] = '('.$this->formatValues(array_values($row)).')';
         }
 
         $valuesClause = implode(', ', $valueRows);
@@ -78,7 +84,7 @@ class GenerateUpsertSql
     {
         $updates = [];
         foreach (array_keys($row) as $col) {
-            if ($col !== 'id') {
+            if ($col !== $this->primaryKey) {
                 $quotedCol = $this->quoteIdentifier($col, $driver);
                 $updates[] = "{$quotedCol} = VALUES({$quotedCol})";
             }
@@ -94,21 +100,22 @@ class GenerateUpsertSql
     {
         $updates = [];
         foreach (array_keys($row) as $col) {
-            if ($col !== 'id') {
+            if ($col !== $this->primaryKey) {
                 $quotedCol = $this->quoteIdentifier($col, $driver);
                 $updates[] = "{$quotedCol} = EXCLUDED.{$quotedCol}";
             }
         }
 
+        $quotedPk = $this->quoteIdentifier($this->primaryKey, $driver);
         $updateClause = ! empty($updates)
-            ? ' ON CONFLICT (id) DO UPDATE SET '.implode(', ', $updates)
+            ? " ON CONFLICT ({$quotedPk}) DO UPDATE SET ".implode(', ', $updates)
             : ' ON CONFLICT DO NOTHING';
         $quotedTable = $this->quoteIdentifier($table, $driver);
 
         return "INSERT INTO {$quotedTable} ({$columns}) VALUES {$valuesClause}{$updateClause};";
     }
 
-    protected function formatValues(array $values, string $driver): string
+    protected function formatValues(array $values): string
     {
         return implode(', ', array_map(function ($value) {
             if (is_null($value)) {
