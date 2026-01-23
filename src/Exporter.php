@@ -4,127 +4,146 @@ declare(strict_types=1);
 
 namespace KirillDakhniuk\DeadDrop;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
+use KirillDakhniuk\DeadDrop\Actions\Export\BuildExportQuery;
+use KirillDakhniuk\DeadDrop\Actions\Export\WriteTableToHandle;
+use KirillDakhniuk\DeadDrop\Actions\Storage\UploadToCloudStorage;
 
 /**
  * @internal
  */
 final class Exporter
 {
+    public function __construct(
+        protected BuildExportQuery $queryBuilder,
+        protected WriteTableToHandle $tableWriter,
+        protected UploadToCloudStorage $cloudUploader
+    ) {}
+
     public function exportTable(
         string $table,
         string $connection,
         string $outputPath,
-        ?array $overrides = null
+        ?array $overrides = null,
+        ?callable $progressCallback = null
     ): array {
-        $config = config("dead-drop.tables.{$table}");
+        $config = $this->queryBuilder->resolveTableConfig($table, $overrides);
+        $query = $this->queryBuilder->execute($table, $connection, $overrides);
 
-        if (! $config || $config === false) {
-            throw new \InvalidArgumentException("Table {$table} is not configured for export");
-        }
-
-        // Merge runtime overrides with config
-        if ($overrides) {
-            // Special handling for where clause - append instead of replace
-            if (isset($overrides['where'])) {
-                $whereOverrides = $overrides['where'];
-                unset($overrides['where']);
-                $config = array_merge($config, $overrides);
-                $config['where'] = array_merge($config['where'] ?? [], $whereOverrides);
-            } else {
-                $config = array_merge($config, $overrides);
-            }
-        }
-
-        // Ensure output directory exists
         File::ensureDirectoryExists($outputPath);
 
-        // Build query
-        $query = DB::connection($connection)->table($table);
-
-        // Apply column selection
-        if (isset($config['columns']) && $config['columns'] !== '*') {
-            $query->select($config['columns']);
-        }
-
-        // Apply where conditions
-        if (isset($config['where'])) {
-            foreach ($config['where'] as $condition) {
-                $query->where(...$condition);
-            }
-        }
-
-        // Apply order
-        if (isset($config['order_by'])) {
-            [$column, $direction] = array_pad(explode(' ', $config['order_by']), 2, 'ASC');
-            $query->orderBy($column, trim($direction));
-        }
-
-        // Apply limit
-        if (isset($config['limit'])) {
-            $query->limit($config['limit']);
-        }
-
-        // Get data
-        $data = $query->get();
-
-        // Apply default values for required fields not in columns
-        if (isset($config['defaults']) && is_array($config['defaults'])) {
-            $data = $this->applyDefaults($data, $config['defaults']);
-        }
-
-        // Apply censoring to sensitive fields
-        if (isset($config['censor']) && is_array($config['censor'])) {
-            $data = $this->censorFields($data, $config['censor']);
-        }
-
-        // Export to SQL
-        $filename = $this->exportToSql($table, $data, $outputPath);
+        $exportResult = $this->exportToSql($table, $query, $outputPath, $config, $connection, $progressCallback);
 
         $result = [
             'table' => $table,
-            'records' => $data->count(),
-            'file' => $filename,
-            'size' => File::size($filename),
+            'records' => $exportResult['records'],
+            'file' => $exportResult['filename'],
+            'size' => File::size($exportResult['filename']),
             'cloud_path' => null,
             'storage_disk' => null,
         ];
 
-        // Upload to cloud storage if configured
-        $storageDisk = config('dead-drop.storage.disk');
-        if ($storageDisk && $storageDisk !== 'local') {
-            $cloudPath = $this->uploadToCloudStorage($filename, $table, $storageDisk);
-            $result['cloud_path'] = $cloudPath;
-            $result['storage_disk'] = $storageDisk;
-
-            // Delete local file if configured
-            if (config('dead-drop.storage.delete_local_after_upload', false)) {
-                File::delete($filename);
-                $result['local_deleted'] = true;
-            }
-        }
-
-        return $result;
+        return $this->handleCloudUpload($result, $exportResult['filename']);
     }
 
     public function exportAll(string $outputPath, ?string $connection = null, ?array $overrides = null): array
     {
         $connection = $connection ?? config('database.default');
-        $tables = config('dead-drop.tables', []);
 
-        $exportedTables = [];
+        return array_map(
+            fn ($table) => $this->exportTable($table, $connection, $outputPath, $overrides),
+            array_keys($this->getEnabledTables())
+        );
+    }
 
-        foreach ($tables as $table => $config) {
-            if ($config === false) {
-                continue;
-            }
+    public function exportAllToSingleFile(
+        string $outputPath,
+        ?string $connection = null,
+        ?array $overrides = null,
+        ?callable $progressCallback = null
+    ): array {
+        $tables = array_keys($this->getEnabledTables());
 
-            $exportedTables[] = $this->exportTable($table, $connection, $outputPath, $overrides);
+        if (empty($tables)) {
+            throw new \InvalidArgumentException('No tables configured for export');
         }
 
-        return $exportedTables;
+        return $this->exportTablesToSingleFile($tables, $outputPath, $connection, $overrides, $progressCallback);
+    }
+
+    public function exportTablesToSingleFile(
+        array $tables,
+        string $outputPath,
+        ?string $connection = null,
+        ?array $overrides = null,
+        ?callable $progressCallback = null
+    ): array {
+        if (empty($tables)) {
+            throw new \InvalidArgumentException('No tables specified for export');
+        }
+
+        $connection = $connection ?? config('database.default');
+
+        File::ensureDirectoryExists($outputPath);
+
+        $timestamp = now()->format('Y-m-d-His');
+        $filename = "{$outputPath}/database-export-{$timestamp}.sql";
+
+        $handle = fopen($filename, 'w');
+        if ($handle === false) {
+            throw new \RuntimeException("Could not open file for writing: {$filename}");
+        }
+
+        try {
+            $this->writeFileHeader($handle, $connection, count($tables));
+
+            $driver = config("database.connections.{$connection}.driver");
+            $totalRecords = 0;
+
+            foreach ($tables as $table) {
+                $config = $this->queryBuilder->resolveTableConfig($table, $overrides);
+                $query = $this->queryBuilder->execute($table, $connection, $overrides);
+
+                $this->writeTableHeader($handle, $table, $config);
+
+                $cumulativeOffset = $totalRecords;
+                $recordsExported = $this->tableWriter->execute(
+                    $table,
+                    $query,
+                    $handle,
+                    $config,
+                    $driver,
+                    $connection,
+                    $progressCallback ? fn ($current) => $progressCallback($cumulativeOffset + $current) : null
+                );
+
+                $totalRecords += $recordsExported;
+            }
+
+            $this->writeFileFooter($handle, $totalRecords);
+            fclose($handle);
+
+            $result = [
+                'file' => $filename,
+                'tables' => $tables,
+                'total_records' => $totalRecords,
+                'size' => File::size($filename),
+                'cloud_path' => null,
+                'storage_disk' => null,
+            ];
+
+            return $this->handleCloudUpload($result, $filename);
+
+        } catch (\Exception $e) {
+            if (isset($handle) && $handle !== false) {
+                fclose($handle);
+            }
+            if (File::exists($filename)) {
+                File::delete($filename);
+            }
+
+            throw $e;
+        }
     }
 
     public function export(
@@ -139,191 +158,172 @@ final class Exporter
         return $this->exportTable($table, $connection, $outputPath, $overrides);
     }
 
-    protected function exportToSql(string $table, $data, string $outputPath): string
+    public function countRecords(string $table, string $connection, ?array $overrides = null): int
     {
+        $config = $this->queryBuilder->resolveTableConfig($table, $overrides);
+        $query = $this->queryBuilder->execute($table, $connection, $overrides);
+
+        $count = $query->count();
+
+        return isset($config['limit']) ? min($config['limit'], $count) : $count;
+    }
+
+    public function countAllRecords(string $connection, ?array $overrides = null): int
+    {
+        return array_sum(array_map(
+            fn ($table) => $this->countRecords($table, $connection, $overrides),
+            array_keys($this->getEnabledTables())
+        ));
+    }
+
+    public function exportAsync(
+        string $table,
+        ?array $overrides = null,
+        ?string $connection = null,
+        ?string $outputPath = null
+    ): string {
+        $connection = $connection ?? config('database.default');
+        $outputPath = $outputPath ?? config('dead-drop.output_path', storage_path('app/dead-drop'));
+
+        $exportId = \Illuminate\Support\Str::uuid()->toString();
+
+        ExportStatus::create($exportId, 'export', [
+            'table' => $table,
+            'connection' => $connection,
+        ]);
+
+        Jobs\ExportTableJob::dispatch($table, $connection, $outputPath, $overrides, $exportId);
+
+        return $exportId;
+    }
+
+    public function exportAllAsync(?string $outputPath = null, ?string $connection = null, ?array $overrides = null): array
+    {
+        $connection = $connection ?? config('database.default');
+        $outputPath = $outputPath ?? config('dead-drop.output_path', storage_path('app/dead-drop'));
+
+        $exportIds = [];
+        foreach (array_keys($this->getEnabledTables()) as $table) {
+            $exportIds[$table] = $this->exportAsync($table, $overrides, $connection, $outputPath);
+        }
+
+        return $exportIds;
+    }
+
+    public function exportAllToSingleFileAsync(
+        ?string $outputPath = null,
+        ?string $connection = null,
+        ?array $overrides = null
+    ): string {
+        $tables = array_keys($this->getEnabledTables());
+
+        if (empty($tables)) {
+            throw new \InvalidArgumentException('No tables configured for export');
+        }
+
+        return $this->exportTablesToSingleFileAsync($tables, $outputPath, $connection, $overrides);
+    }
+
+    public function exportTablesToSingleFileAsync(
+        array $tables,
+        ?string $outputPath = null,
+        ?string $connection = null,
+        ?array $overrides = null
+    ): string {
+        if (empty($tables)) {
+            throw new \InvalidArgumentException('No tables specified for export');
+        }
+
+        $connection = $connection ?? config('database.default');
+        $outputPath = $outputPath ?? config('dead-drop.output_path', storage_path('app/dead-drop'));
+
+        $exportId = \Illuminate\Support\Str::uuid()->toString();
+
+        ExportStatus::create($exportId, 'export', [
+            'type' => 'single-file',
+            'tables' => $tables,
+            'connection' => $connection,
+        ]);
+
+        Jobs\ExportTablesToSingleFileJob::dispatch($tables, $outputPath, $connection, $overrides, $exportId);
+
+        return $exportId;
+    }
+
+    protected function getEnabledTables(): array
+    {
+        return array_filter(
+            config('dead-drop.tables', []),
+            fn ($config) => $config !== false
+        );
+    }
+
+    protected function exportToSql(
+        string $table,
+        $query,
+        string $outputPath,
+        array $config,
+        string $connection,
+        ?callable $progressCallback
+    ): array {
         $filename = "{$outputPath}/{$table}.sql";
+        $handle = fopen($filename, 'w');
 
-        $sql = "-- Data export for table: {$table}\n";
-        $sql .= '-- Generated at: '.now()->toDateTimeString()."\n";
-        $sql .= "-- Using upsert syntax for safe re-import\n\n";
-
-        $driver = config('database.default');
-        $driverType = config("database.connections.{$driver}.driver");
-
-        foreach ($data as $row) {
-            $rowArray = (array) $row;
-            $columns = implode(', ', array_map(fn ($col) => "`{$col}`", array_keys($rowArray)));
-            $values = implode(', ', array_map(function ($value) {
-                if (is_null($value)) {
-                    return 'NULL';
-                }
-                if (is_numeric($value)) {
-                    return $value;
-                }
-
-                return "'".addslashes($value)."'";
-            }, array_values($rowArray)));
-
-            // Generate upsert statement based on database driver
-            $statement = $this->generateUpsertStatement($table, $rowArray, $columns, $values, $driverType);
-            $sql .= $statement."\n";
+        if ($handle === false) {
+            throw new \RuntimeException("Could not open file for writing: {$filename}");
         }
 
-        File::put($filename, $sql);
+        fwrite($handle, "-- Table: {$table}\n");
+        fwrite($handle, '-- Exported: '.now()->toDateTimeString()."\n");
+        fwrite($handle, "-- Format: upsert (safe for re-import)\n\n");
 
-        return $filename;
-    }
+        $driver = config("database.connections.{$connection}.driver");
 
-    protected function generateUpsertStatement(string $table, array $row, string $columns, string $values, string $driver): string
-    {
-        switch ($driver) {
-            case 'sqlite':
-                // SQLite: INSERT OR REPLACE
-                return "INSERT OR REPLACE INTO `{$table}` ({$columns}) VALUES ({$values});";
+        $recordCount = $this->tableWriter->execute($table, $query, $handle, $config, $driver, $connection, $progressCallback);
 
-            case 'mysql':
-            case 'mariadb':
-                // MySQL: INSERT ... ON DUPLICATE KEY UPDATE
-                $updates = [];
-                foreach (array_keys($row) as $col) {
-                    if ($col !== 'id') { // Don't update the primary key
-                        $updates[] = "`{$col}` = VALUES(`{$col}`)";
-                    }
-                }
-                $updateClause = ! empty($updates) ? ' ON DUPLICATE KEY UPDATE '.implode(', ', $updates) : '';
+        fclose($handle);
 
-                return "INSERT INTO `{$table}` ({$columns}) VALUES ({$values}){$updateClause};";
-
-            case 'pgsql':
-                // PostgreSQL: INSERT ... ON CONFLICT DO UPDATE
-                $updates = [];
-                foreach (array_keys($row) as $col) {
-                    if ($col !== 'id') {
-                        $updates[] = "`{$col}` = EXCLUDED.`{$col}`";
-                    }
-                }
-                $updateClause = ! empty($updates) ? ' ON CONFLICT (id) DO UPDATE SET '.implode(', ', $updates) : ' ON CONFLICT DO NOTHING';
-
-                return "INSERT INTO `{$table}` ({$columns}) VALUES ({$values}){$updateClause};";
-
-            default:
-                // Fallback to standard INSERT
-                return "INSERT INTO `{$table}` ({$columns}) VALUES ({$values});";
-        }
-    }
-
-    protected function uploadToCloudStorage(string $localFilePath, string $table, string $disk): string
-    {
-        $storagePath = config('dead-drop.storage.path', 'dead-drop');
-        $filename = basename($localFilePath);
-        $cloudPath = trim($storagePath, '/').'/'.$filename;
-
-        $storage = Storage::disk($disk);
-        $storage->put($cloudPath, File::get($localFilePath));
-
-        return $cloudPath;
-    }
-
-    protected function applyDefaults($data, array $defaults)
-    {
-        return $data->map(function ($row) use ($defaults) {
-            $row = (array) $row;
-
-            foreach ($defaults as $field => $value) {
-                // Only add default if field is not already present
-                if (! array_key_exists($field, $row)) {
-                    // Auto-hash password fields for security
-                    if ($this->isPasswordField($field)) {
-                        $row[$field] = bcrypt($value);
-                    } else {
-                        $row[$field] = $value;
-                    }
-                }
-            }
-
-            return (object) $row;
-        });
-    }
-
-    protected function isPasswordField(string $fieldName): bool
-    {
-        $passwordFields = ['password', 'password_hash', 'passwd', 'user_password'];
-
-        return in_array(strtolower($fieldName), $passwordFields);
-    }
-
-    protected function censorFields($data, array $censorFields)
-    {
-        $faker = \Faker\Factory::create();
-
-        return $data->map(function ($row) use ($censorFields, $faker) {
-            $row = (array) $row;
-
-            foreach ($censorFields as $field => $fakerMethod) {
-                // Support both simple array ['email', 'name'] and associative ['email' => 'safeEmail']
-                if (is_numeric($field)) {
-                    $field = $fakerMethod;
-                    $fakerMethod = $this->detectFakerMethod($field);
-                }
-
-                if (array_key_exists($field, $row)) {
-                    $row[$field] = $this->generateFakeValue($faker, $fakerMethod);
-                }
-            }
-
-            return (object) $row;
-        });
-    }
-
-    protected function detectFakerMethod(string $fieldName): string
-    {
-        $fieldName = strtolower($fieldName);
-
-        $mapping = [
-            'email' => 'safeEmail',
-            'email_address' => 'safeEmail',
-            'name' => 'name',
-            'first_name' => 'firstName',
-            'last_name' => 'lastName',
-            'username' => 'userName',
-            'phone' => 'phoneNumber',
-            'phone_number' => 'phoneNumber',
-            'mobile' => 'phoneNumber',
-            'address' => 'address',
-            'street' => 'streetAddress',
-            'street_address' => 'streetAddress',
-            'city' => 'city',
-            'state' => 'state',
-            'zip' => 'postcode',
-            'zipcode' => 'postcode',
-            'postal_code' => 'postcode',
-            'country' => 'country',
-            'company' => 'company',
-            'job_title' => 'jobTitle',
-            'description' => 'sentence',
-            'bio' => 'paragraph',
-            'website' => 'url',
-            'url' => 'url',
-            'ip' => 'ipv4',
-            'ip_address' => 'ipv4',
-            'ipv4' => 'ipv4',
-            'ipv6' => 'ipv6',
-            'mac_address' => 'macAddress',
-            'uuid' => 'uuid',
-            'ssn' => 'ssn',
-            'credit_card' => 'creditCardNumber',
-            'iban' => 'iban',
+        return [
+            'filename' => $filename,
+            'records' => $recordCount,
         ];
-
-        return $mapping[$fieldName] ?? 'word';
     }
 
-    protected function generateFakeValue($faker, string $method)
+    protected function handleCloudUpload(array $result, string $localFilePath): array
     {
-        try {
-            return $faker->$method;
-        } catch (\Exception $e) {
-            return '[FAKE_DATA]';
+        $cloudResult = $this->cloudUploader->execute($localFilePath);
+
+        if ($cloudResult) {
+            $result['cloud_path'] = $cloudResult['cloud_path'];
+            $result['storage_disk'] = $cloudResult['storage_disk'];
+            $result['local_deleted'] = $cloudResult['local_deleted'];
         }
+
+        return $result;
+    }
+
+    protected function writeFileHeader($handle, string $connection, int $tableCount): void
+    {
+        fwrite($handle, "-- Dead Drop Export\n");
+        fwrite($handle, '-- Exported: '.now()->toDateTimeString()."\n");
+        fwrite($handle, "-- Connection: {$connection}\n");
+        fwrite($handle, "-- Tables: {$tableCount}\n\n");
+    }
+
+    protected function writeTableHeader($handle, string $table, array $config): void
+    {
+        fwrite($handle, "\n-- Table: {$table}\n");
+
+        if (isset($config['where'])) {
+            $filters = array_map(fn ($c) => implode(' ', $c), $config['where']);
+            fwrite($handle, '-- Filters: '.implode(', ', $filters)."\n");
+        }
+
+        fwrite($handle, "\n");
+    }
+
+    protected function writeFileFooter($handle, int $totalRecords): void
+    {
+        fwrite($handle, "\n-- Export complete: {$totalRecords} records\n");
     }
 }

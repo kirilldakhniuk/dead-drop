@@ -1,15 +1,12 @@
 # Dead Drop
 
-Export and import your database tables with fake data. Perfect for sharing database dumps without leaking real user information.
+Export and import database tables with fake data. Share database dumps without exposing real user information.
 
-## What's This?
+## Features
 
-Dead Drop lets you export database tables to SQL files with built-in privacy protection. Need to share production data with your team? Just mark the sensitive fields and they'll be replaced with realistic fake data using Faker.
-
-**Key Features:**
 - Export tables to SQL with upsert syntax
-- Replace sensitive data with fake data automatically
-- Cloud storage support (S3, Spaces, etc.)
+- Replace sensitive data with Faker-generated values
+- Cloud storage support (S3, DigitalOcean Spaces)
 - Works with SQLite, MySQL, and PostgreSQL
 
 ## Installation
@@ -18,10 +15,12 @@ Dead Drop lets you export database tables to SQL files with built-in privacy pro
 composer require kirilldakhniuk/dead-drop
 ```
 
-Publish the config file:
+Publish the config and migrations:
 
 ```bash
 php artisan vendor:publish --tag=dead-drop-config
+php artisan vendor:publish --tag=dead-drop-migrations
+php artisan migrate
 ```
 
 ## Basic Usage
@@ -34,24 +33,16 @@ php artisan dead-drop:export
 php artisan dead-drop:import
 ```
 
-The commands are interactive - just answer the prompts.
-
-Want to use a different database connection? Use the `--connection` flag:
+The commands are interactive. To specify a database connection:
 
 ```bash
 php artisan dead-drop:export --connection=mysql
 php artisan dead-drop:import --connection=tenant_db
 ```
 
-## Interactive Date Filtering
+## Date Filtering
 
-Filter by date range interactively when exporting:
-
-```bash
-php artisan dead-drop:export
-```
-
-Choose from preset date ranges or enter a custom interval:
+Filter exports by date range interactively:
 
 ```
 Export all configured tables? (yes/no) [no]:
@@ -69,15 +60,12 @@ Examples: 2024-01-01, last month, 30 days ago, yesterday
 > last month
 
 Filter to date (optional):
-Examples: 2024-01-01, last month, 30 days ago, yesterday
 > yesterday
 ```
 
-Preset options provide quick access to common date ranges (defaults to "Today"). Custom interval supports natural language dates via Carbon. Date filters work for both single table and batch exports, applied alongside config-based where conditions.
+Custom intervals support natural language dates via Carbon.
 
 ## Facade API
-
-Use the `DeadDrop` facade for programmatic exports:
 
 ```php
 use KirillDakhniuk\DeadDrop\Facades\DeadDrop;
@@ -100,7 +88,7 @@ DeadDrop::exportAll(null, null, [
     ]
 ]);
 
-// Perfect for Nova/Filament
+// Nova/Filament integration
 public function handle()
 {
     $result = DeadDrop::export('users', [
@@ -115,7 +103,7 @@ public function handle()
 
 ## Configuration
 
-Edit `config/dead-drop.php` to configure which tables to export:
+Edit `config/dead-drop.php`:
 
 ```php
 return [
@@ -124,7 +112,7 @@ return [
     'tables' => [
         'users' => [
             'columns' => ['id', 'name', 'email', 'created_at'],
-            'censor' => ['email'], // Replace emails with fake ones
+            'censor' => ['email'],
             'defaults' => ['password' => 'password'], // Auto-hashed with bcrypt
             'where' => [['created_at', '>', now()->subDays(30)]],
             'limit' => 1000,
@@ -133,17 +121,17 @@ return [
 ];
 ```
 
-### Configuration Options
+### Options
 
 ```php
 'tables' => [
     'table_name' => [
         'columns' => ['id', 'name', 'email'], // or '*' for all
-        'censor' => ['email', 'phone'], // Fields to fake
-        'defaults' => ['password' => 'secret'], // Required fields not in columns
+        'censor' => ['email', 'phone'],
+        'defaults' => ['password' => 'secret'],
         'where' => [
             ['status', '=', 'active'],
-            ['created_at', '>', now()->subYear()], // Use Laravel date helpers
+            ['created_at', '>', now()->subYear()],
         ],
         'order_by' => 'created_at DESC',
         'limit' => 1000,
@@ -154,11 +142,9 @@ return [
 ],
 ```
 
-**Date filtering:** Use Laravel's date helpers like `now()->subDays(30)`, `now()->subYear()`, `today()`, etc. for dynamic date ranges.
-
 ## Data Anonymization
 
-This is the main reason this package exists. Just list the fields you want to anonymize:
+List fields to anonymize:
 
 ```php
 'users' => [
@@ -167,7 +153,7 @@ This is the main reason this package exists. Just list the fields you want to an
 ],
 ```
 
-The package auto-detects common fields and uses the right Faker method:
+The package auto-detects common fields and applies appropriate Faker methods:
 
 | Field | Faker Method | Example |
 |-------|--------------|---------|
@@ -178,12 +164,11 @@ The package auto-detects common fields and uses the right Faker method:
 | city | city | New York |
 | ip | ipv4 | 192.168.1.1 |
 
-**Auto-detected fields:**
-email, name, first_name, last_name, phone, address, city, state, zip, country, company, job_title, website, url, ip, ssn, credit_card, and more.
+Auto-detected fields include: email, name, first_name, last_name, phone, address, city, state, zip, country, company, job_title, website, url, ip, ssn, credit_card, and more.
 
 ### Custom Faker Methods
 
-Want more control? Specify the Faker method:
+Specify the Faker method for more control:
 
 ```php
 'censor' => [
@@ -197,30 +182,28 @@ See all available methods at [fakerphp.github.io](https://fakerphp.github.io/for
 
 ## Upsert Support
 
-All exports use upsert syntax, so you can import the same file multiple times without errors. The package automatically uses the right syntax for your database:
+Exports use upsert syntax for safe re-imports:
 
 - **SQLite**: `INSERT OR REPLACE`
 - **MySQL**: `INSERT ... ON DUPLICATE KEY UPDATE`
 - **PostgreSQL**: `INSERT ... ON CONFLICT DO UPDATE`
 
-This means no "duplicate entry" errors. Just re-import whenever you want.
-
 ## Default Values
 
-If you're exporting partial columns, you might need defaults for required fields:
+For partial column exports, add defaults for required fields:
 
 ```php
 'users' => [
     'columns' => ['id', 'name', 'email'],
-    'defaults' => ['password' => 'password'], // Prevents NOT NULL errors
+    'defaults' => ['password' => 'password'],
 ],
 ```
 
-Password fields (`password`, `password_hash`, etc.) are automatically hashed with bcrypt.
+Password fields are automatically hashed with bcrypt.
 
 ## Cloud Storage
 
-Want to upload exports to S3 or DigitalOcean Spaces? Configure it in your `.env`:
+Configure cloud uploads in `.env`:
 
 ```env
 DEAD_DROP_STORAGE_DISK=s3
@@ -233,7 +216,7 @@ AWS_DEFAULT_REGION=us-east-1
 AWS_BUCKET=your-bucket
 ```
 
-Make sure you have the AWS SDK installed:
+Install the AWS SDK:
 
 ```bash
 composer require league/flysystem-aws-s3-v3 "^3.0"
@@ -241,7 +224,7 @@ composer require league/flysystem-aws-s3-v3 "^3.0"
 
 ### DigitalOcean Spaces
 
-Add this to `config/filesystems.php`:
+Add to `config/filesystems.php`:
 
 ```php
 'spaces' => [
@@ -254,7 +237,7 @@ Add this to `config/filesystems.php`:
 ],
 ```
 
-Then in `.env`:
+Configure in `.env`:
 
 ```env
 DEAD_DROP_STORAGE_DISK=spaces
@@ -283,14 +266,11 @@ $result = $importer->importFromCloud('backups/users.sql', 's3', 'mysql');
 
 ## Troubleshooting
 
-**"NOT NULL constraint" errors?**
-Add defaults for required fields you're not exporting.
+**NOT NULL constraint errors** - Add defaults for required fields you're not exporting.
 
-**"Foreign key constraint" errors?**
-Import parent tables first, or temporarily disable foreign key checks.
+**Foreign key constraint errors** - Import parent tables first, or disable foreign key checks temporarily.
 
-**"Duplicate entry" errors?**
-Shouldn't happen - the package uses upsert syntax. If you're importing external SQL files, that's why.
+**Duplicate entry errors** - This shouldn't happen with Dead Drop exports since they use upsert syntax. External SQL files may cause this.
 
 ## Requirements
 

@@ -1,45 +1,26 @@
 <?php
 
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
 |--------------------------------------------------------------------------
-|
-| The closure you provide to your test functions is always bound to a specific PHPUnit test
-| case class. By default, that class is "PHPUnit\Framework\TestCase". Of course, you may
-| need to change it using the "uses()" function to bind a different classes or traits.
-|
 */
-
-use Tests\TestCase;
 
 uses(TestCase::class)->in('Feature', 'Unit');
 
 /*
 |--------------------------------------------------------------------------
-| Expectations
+| Helper Functions
 |--------------------------------------------------------------------------
-|
-| When you're writing tests, you often need to check that values meet certain conditions. The
-| "expect()" function gives you access to a set of "expectations" methods that you can use
-| to assert different things. Of course, you may extend the Expectation API at any time.
-|
 */
 
-expect()->extend('toBeOne', function () {
-    return $this->toBe(1);
-});
-
-/*
-|--------------------------------------------------------------------------
-| Functions
-|--------------------------------------------------------------------------
-|
-| While Pest is very powerful out-of-the-box, you may have some testing code specific to your
-| project that you don't want to repeat in every file. Here you can also expose helpers as
-| global functions to help you to reduce the number of lines of code in your test files.
-|
-*/
+const TEST_OUTPUT_PATH = '/tmp/dead-drop-test';
+const TEST_CLOUD_PATH = '/tmp/cloud-storage';
 
 function createTestDatabase(): void
 {
@@ -103,4 +84,73 @@ function seedTestData(): void
             'updated_at' => now(),
         ]);
     }
+}
+
+function createDeadDropExportsTable(): void
+{
+    $db = app('db');
+
+    if ($db->getSchemaBuilder()->hasTable('dead_drop_exports')) {
+        return;
+    }
+
+    $db->getSchemaBuilder()->create('dead_drop_exports', function ($table) {
+        $table->uuid('id')->primary();
+        $table->string('type');
+        $table->string('status');
+        $table->json('metadata')->nullable();
+        $table->integer('progress_current')->default(0);
+        $table->integer('progress_total')->nullable();
+        $table->json('result')->nullable();
+        $table->text('error')->nullable();
+        $table->timestamps();
+
+        $table->index('status');
+        $table->index('created_at');
+    });
+}
+
+function testUuid(): string
+{
+    return Str::uuid()->toString();
+}
+
+function cleanupTestDirectory(string $path): void
+{
+    if (File::exists($path)) {
+        File::deleteDirectory($path);
+    }
+}
+
+function setupCloudStorage(string $diskName = 'testing-cloud'): void
+{
+    Config::set("dead-drop.storage.disk", $diskName);
+    Config::set("filesystems.disks.{$diskName}", [
+        'driver' => 'local',
+        'root' => TEST_CLOUD_PATH,
+    ]);
+}
+
+function createTestSqlFile(string $path, int $userId, string $name, string $email): string
+{
+    File::ensureDirectoryExists(dirname($path));
+    $hashedPassword = bcrypt('password');
+    $sql = "INSERT OR REPLACE INTO `users` (`id`, `name`, `email`, `password`, `created_at`, `updated_at`) VALUES ({$userId}, '{$name}', '{$email}', '{$hashedPassword}', '2024-01-01 00:00:00', '2024-01-01 00:00:00');\n";
+    File::put($path, $sql);
+
+    return $path;
+}
+
+function configureUsersTable(array $options = []): void
+{
+    Config::set('dead-drop.tables.users', array_merge([
+        'columns' => ['id', 'name', 'email', 'created_at', 'updated_at'],
+    ], $options));
+}
+
+function configurePostsTable(array $options = []): void
+{
+    Config::set('dead-drop.tables.posts', array_merge([
+        'columns' => ['id', 'title', 'content', 'status'],
+    ], $options));
 }

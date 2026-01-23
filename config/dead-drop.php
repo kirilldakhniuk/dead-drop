@@ -5,33 +5,41 @@
 | Dead Drop Configuration
 |--------------------------------------------------------------------------
 |
-| This file controls how Dead Drop exports and imports your database tables.
-| You MUST configure the 'tables' array below to define which tables to export
-| and which columns to include. See documentation for all available options.
+| Configure database export and import settings. Define which tables to
+| export, columns to include, and storage destinations.
 |
 */
 
 return [
     /*
     |--------------------------------------------------------------------------
-    | Default Output Path
+    | Output Path
     |--------------------------------------------------------------------------
     |
-    | The default directory where exported SQL files will be saved locally.
+    | Local directory for exported SQL files.
     |
     */
     'output_path' => storage_path('app/dead-drop'),
 
     /*
     |--------------------------------------------------------------------------
-    | Storage Configuration
+    | Queue
     |--------------------------------------------------------------------------
     |
-    | Configure where to store exported files. Options:
-    | - 'local': Only save to local filesystem
-    | - 's3': Upload to Amazon S3
-    | - 'spaces': Upload to DigitalOcean Spaces
-    | - Any Laravel filesystem disk name
+    | Queue connection for async jobs. Uses Laravel's default when null.
+    |
+    */
+    'queue' => [
+        'connection' => env('DEAD_DROP_QUEUE_CONNECTION'),
+        'queue_name' => env('DEAD_DROP_QUEUE_NAME', 'default'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage
+    |--------------------------------------------------------------------------
+    |
+    | Export destination: 'local', 's3', 'spaces', or any Laravel disk.
     |
     */
     'storage' => [
@@ -44,25 +52,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Tables Configuration
+    | Tables
     |--------------------------------------------------------------------------
     |
-    | Configure which tables to export and which columns to include.
-    | Set a table to `false` to disable export for that table.
+    | Define tables and columns to export. Set to `false` to disable.
     |
-    | Available options per table:
-    | - columns: Array of columns to export (or '*' for all)
-    | - where: Array of where conditions
-    | - order_by: Order by clause (e.g., 'created_at DESC')
-    | - limit: Maximum number of records to export
-    | - censor: Array of columns to replace with fake data
-    |   - Simple format: ['email', 'phone'] - auto-detects faker method
-    |   - Advanced format: ['email' => 'safeEmail', 'name' => 'name', 'ip' => 'ipv4']
-    | - defaults: Default values for required fields not included in 'columns'
-    |   - Example: ['password' => 'password', 'status' => 'active']
-    |   - Prevents NOT NULL constraint violations on import
-    |   - Password fields are automatically hashed with bcrypt for security
-    |   - Supported password fields: password, password_hash, passwd, user_password
+    | Options:
+    | - columns: Column list or '*' for all
+    | - where: Filter conditions
+    | - order_by: Sort clause (e.g., 'created_at DESC')
+    | - limit: Maximum records
+    | - censor: Replace with fake data (['email'] or ['email' => 'safeEmail'])
+    | - defaults: Values for omitted NOT NULL fields (passwords auto-hashed)
     |
     */
     'tables' => [
@@ -75,14 +76,12 @@ return [
             'limit' => 1000,
         ],
 
-        // More examples:
         // 'posts' => [
         //     'columns' => '*',
         //     'where' => [['status', '=', 'published']],
         //     'order_by' => 'created_at DESC',
         // ],
 
-        // Disable export for specific table:
         // 'logs' => false,
     ],
 ];

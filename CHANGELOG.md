@@ -1,44 +1,50 @@
 # Changelog
 
-All notable changes to `dead-drop` will be documented in this file.
+All notable changes to Dead Drop will be documented in this file.
+
+## 0.3.0 - 2026-01-23
+
+### Fixed
+- Export jobs now properly dispatch to configured queue
+- Consistent queue routing across all job types
+
+### Added
+- `queue_name` config option for specifying target queue
+
+### Changed
+- Jobs configure connection and queue in constructor (removed redundant dispatch chaining)
+- Streamlined config comments and export file headers
+- Updated README with migration publish instructions
 
 ## 0.2.0 - 2026-01-07
 
 ### Added
 - Interactive date range filtering in CLI export command
-  - Preset options: Today, Yesterday, Last 7 days, Last 30 days
-  - Custom interval with natural language dates via Carbon::parse()
-  - Examples for custom: "yesterday", "last month", "30 days ago", "2024-01-01"
-  - Defaults to "Today" for quick exports
-  - Works for both single table and batch (exportAll) exports
+  - Presets: Today, Yesterday, Last 7 days, Last 30 days
+  - Custom intervals with natural language dates via Carbon
+  - Works for single table and batch exports
 - DeadDrop Facade for cleaner programmatic API
   - `DeadDrop::export('users')` instead of `app(Exporter::class)->exportTable()`
   - Support for date parameters and config overrides
-  - Perfect for Nova/Filament admin panel integrations
+  - Ideal for Nova/Filament integrations
 
 ### Changed
-- Exporter::exportTable() now accepts optional $overrides parameter
-  - Allows runtime filtering without modifying config
-  - Where conditions are merged (appended), other options are replaced
-  - Fully backward compatible
-- Exporter::exportAll() now accepts optional $overrides parameter
-  - Apply date filters to all tables in batch export
-  - Same merging behavior as exportTable()
+- `Exporter::exportTable()` accepts optional `$overrides` parameter for runtime filtering
+- `Exporter::exportAll()` accepts optional `$overrides` parameter for batch date filtering
+- Where conditions merge (append), other options replace
 
 ## 0.1.0 - 2026-01-07
 
-Initial beta release
+Initial release.
 
 ### Added
-- Export database tables to SQL files with upsert syntax
+- Export database tables to SQL with upsert syntax
 - Import SQL files with transaction support
-- Data anonymization using Faker
-- Auto-detection of sensitive fields
+- Data anonymization using Faker with auto-detection
 - Custom Faker method support
-- Default values for required fields
-- Automatic password hashing for defaults
-- Cloud storage support (S3, Spaces, etc.)
+- Default values with automatic password hashing
+- Cloud storage support (S3, Spaces)
 - Multi-database connection support
-- Support for SQLite, MySQL, and PostgreSQL
+- SQLite, MySQL, and PostgreSQL support
 - Interactive CLI commands
-- Programmatic API for exports and imports
+- Programmatic API

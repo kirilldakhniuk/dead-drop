@@ -7,6 +7,7 @@ namespace KirillDakhniuk\DeadDrop;
 use Illuminate\Support\ServiceProvider;
 use KirillDakhniuk\DeadDrop\Commands\ExportCommand;
 use KirillDakhniuk\DeadDrop\Commands\ImportCommand;
+use KirillDakhniuk\DeadDrop\Commands\StatusCommand;
 
 class DeadDropServiceProvider extends ServiceProvider
 {
@@ -17,13 +18,8 @@ class DeadDropServiceProvider extends ServiceProvider
             'dead-drop'
         );
 
-        $this->app->singleton(Exporter::class, function ($app) {
-            return new Exporter;
-        });
-
-        $this->app->singleton(Importer::class, function ($app) {
-            return new Importer;
-        });
+        $this->app->singleton(Exporter::class);
+        $this->app->singleton(Importer::class);
 
         // Register facade alias
         $this->app->singleton('dead-drop', function ($app) {
@@ -37,6 +33,7 @@ class DeadDropServiceProvider extends ServiceProvider
             $this->commands([
                 ExportCommand::class,
                 ImportCommand::class,
+                StatusCommand::class,
             ]);
 
             // Publish configuration file
@@ -48,6 +45,16 @@ class DeadDropServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../config/dead-drop.php' => config_path('dead-drop.php'),
             ], 'config');
+
+            // Publish migrations
+            $this->publishes([
+                __DIR__.'/../database/migrations/create_dead_drop_exports_table.php.stub' => database_path('migrations/'.date('Y_m_d_His').'_create_dead_drop_exports_table.php'),
+            ], 'dead-drop-migrations');
+
+            // Allow publishing with 'migrations' tag as well
+            $this->publishes([
+                __DIR__.'/../database/migrations/create_dead_drop_exports_table.php.stub' => database_path('migrations/'.date('Y_m_d_His').'_create_dead_drop_exports_table.php'),
+            ], 'migrations');
         }
     }
 }

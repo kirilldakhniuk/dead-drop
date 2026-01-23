@@ -98,6 +98,10 @@
             "Composer\\Config::disableProcessTimeout",
             "@build",
             "@php vendor/bin/testbench serve --ansi"
+        ],
+        "format": [
+            "./vendor/bin/pint --dirty",
+            "./vendor/bin/phpstan --memory-limit=2G"
         ]
     }
 }
