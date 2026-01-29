@@ -376,3 +376,99 @@ test('exportTable works with custom primary key', function () {
         ->toContain('Company 2')
         ->toContain('Company 3');
 });
+
+test('exportTable ignores date filtering when date_column is false', function () {
+    $db = app('db');
+    $db->getSchemaBuilder()->create('settings', function ($table) {
+        $table->id();
+        $table->string('key');
+        $table->string('value');
+    });
+
+    for ($i = 1; $i <= 5; $i++) {
+        $db->table('settings')->insert([
+            'key' => "setting_{$i}",
+            'value' => "value_{$i}",
+        ]);
+    }
+
+    Config::set('dead-drop.tables.settings', [
+        'columns' => ['id', 'key', 'value'],
+        'date_column' => false,
+    ]);
+
+    $exporter = app(Exporter::class);
+
+    // Apply date filter override - should be ignored since date_column is false
+    $overrides = [
+        'where' => [
+            ['created_at', '>=', now()->subDays(7)->toDateTimeString()],
+        ],
+    ];
+
+    $result = $exporter->exportTable('settings', 'testing', TEST_OUTPUT_PATH, $overrides);
+
+    // All 5 records should be exported (date filter ignored)
+    expect($result['records'])->toBe(5);
+
+    $content = File::get($result['file']);
+
+    expect($content)
+        ->toContain('setting_1')
+        ->toContain('setting_2')
+        ->toContain('setting_3')
+        ->toContain('setting_4')
+        ->toContain('setting_5');
+});
+
+test('exportTable uses custom date_column for filtering', function () {
+    $db = app('db');
+    $db->getSchemaBuilder()->create('orders', function ($table) {
+        $table->id();
+        $table->string('product');
+        $table->dateTime('order_date');
+    });
+
+    // Insert old orders (40 and 35 days ago)
+    collect([40, 35])->each(function ($daysAgo, $index) use ($db) {
+        $db->table('orders')->insert([
+            'product' => 'Old Product '.($index + 1),
+            'order_date' => now()->subDays($daysAgo)->toDateTimeString(),
+        ]);
+    });
+
+    // Insert recent orders (10 and 5 days ago)
+    collect([10, 5])->each(function ($daysAgo, $index) use ($db) {
+        $db->table('orders')->insert([
+            'product' => 'Recent Product '.($index + 1),
+            'order_date' => now()->subDays($daysAgo)->toDateTimeString(),
+        ]);
+    });
+
+    Config::set('dead-drop.tables.orders', [
+        'columns' => ['id', 'product', 'order_date'],
+        'date_column' => 'order_date',
+    ]);
+
+    $exporter = app(Exporter::class);
+
+    // Use created_at in override - should be rewritten to order_date
+    $overrides = [
+        'where' => [
+            ['created_at', '>=', now()->subDays(30)->toDateTimeString()],
+        ],
+    ];
+
+    $result = $exporter->exportTable('orders', 'testing', TEST_OUTPUT_PATH, $overrides);
+
+    // Only 2 recent records should be exported
+    expect($result['records'])->toBe(2);
+
+    $content = File::get($result['file']);
+
+    expect($content)
+        ->toContain('Recent Product 1')
+        ->toContain('Recent Product 2')
+        ->not->toContain('Old Product 1')
+        ->not->toContain('Old Product 2');
+});

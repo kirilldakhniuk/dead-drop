@@ -49,7 +49,16 @@ class BuildExportQuery
         }
 
         if (isset($config['where'])) {
+            $dateColumn = $config['date_column'] ?? 'created_at';
+
             foreach ($config['where'] as $condition) {
+                if ($this->isDateCondition($condition)) {
+                    if ($dateColumn === false) {
+                        continue;
+                    }
+                    $condition[0] = $dateColumn;
+                }
+
                 $query->where(...$condition);
             }
         }
@@ -69,5 +78,10 @@ class BuildExportQuery
         }
 
         return $query;
+    }
+
+    protected function isDateCondition(array $condition): bool
+    {
+        return $condition[0] === 'created_at';
     }
 }

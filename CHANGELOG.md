@@ -2,6 +2,9 @@
 
 All notable changes to Dead Drop will be documented in this file.
 
+## 0.3.2 - 2026-01-29
+- Added `date_column` config option to specify custom date column for filtering (defaults to `created_at`, set to `false` to disable)
+
 ## 0.3.1 - 2026-01-23
 - Added ability to specify table `primary_key`
 
