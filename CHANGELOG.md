@@ -2,6 +2,9 @@
 
 All notable changes to Dead Drop will be documented in this file.
 
+## 0.3.3 - 2026-01-29
+- Interactive file picker for cloud imports (lists available SQL files with sizes)
+
 ## 0.3.2 - 2026-01-29
 - Added `date_column` config option to specify custom date column for filtering (defaults to `created_at`, set to `false` to disable)
 

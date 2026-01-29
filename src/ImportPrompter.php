@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace KirillDakhniuk\DeadDrop;
 
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use KirillDakhniuk\DeadDrop\Concerns\FormatsBytes;
 
 use function Laravel\Prompts\confirm;
@@ -144,12 +145,46 @@ class ImportPrompter
     protected function promptForCloudPath(): string
     {
         $storagePath = config('dead-drop.storage.path', 'dead-drop');
+        $disk = config('dead-drop.storage.disk');
+        $storage = Storage::disk($disk);
 
-        return text(
-            label: 'Enter the cloud storage path (e.g., dead-drop/users.sql)',
-            default: $storagePath.'/',
-            required: true,
+        $sqlFiles = collect($storage->files($storagePath))
+            ->filter(fn ($file) => str_ends_with($file, '.sql'))
+            ->sortDesc()
+            ->values()
+            ->all();
+
+        if (empty($sqlFiles)) {
+            warning("No SQL files found in cloud storage: {$storagePath}");
+
+            return text(
+                label: 'Enter the cloud storage path (e.g., dead-drop/export.sql)',
+                default: $storagePath.'/',
+                required: true,
+            );
+        }
+
+        $options = [];
+        foreach ($sqlFiles as $file) {
+            $size = $this->formatBytes($storage->size($file));
+            $options[$file] = basename($file)." ({$size})";
+        }
+        $options['custom'] = 'Enter custom path...';
+
+        $selected = select(
+            label: 'Select SQL file to import',
+            options: $options,
         );
+
+        if ($selected === 'custom') {
+            return text(
+                label: 'Enter the cloud storage path',
+                default: $storagePath.'/',
+                required: true,
+            );
+        }
+
+        return $selected;
     }
 
     protected function confirmImport(string $filename, string $size): bool
